@@ -45,7 +45,7 @@ A13 阶段的开发**已冻结**（用户决定），后续在 **Android 16 / Li
 
 ```bash
 # 1) 放进 lineage-20.0 源码树
-git clone https://github.com/<you>/android_device_lenovo_tb335fc_los \
+git clone https://github.com/tc1911/android_device_lenovo_tb335fc_los \
     device/lenovo/sycamore
 
 # 2) 抽取 vendor/odm blobs（需要原厂 ROM 或设备本身；仓库不含这些专有文件）
@@ -81,8 +81,8 @@ fastboot、从 `/metadata` 读内核日志等）。要点：**没有独立 recov
 - 厂商二进制（`modules_dlkm/*.ko`、`prebuilt/Image`、`prebuilt/dtbo.img`、`prebuilt/dtb*`、
   `recovery/root/lib/modules/*.ko`）：版权归 Lenovo / MediaTek / Google，**不适用**本仓库的
   Apache-2.0 许可，见 [NOTICE](NOTICE)
-- 建立在 [LineageOS](https://lineageos.org/) / AOSP 的成果之上；TWRP、OrangeFox 的设备树见
-  本项目另外两个仓库
+- 建立在 [LineageOS](https://lineageos.org/) / AOSP 的成果之上；TWRP、OrangeFox 的设备树见本项目另外两个仓库
+  （[twrp](https://github.com/tc1911/android_device_lenovo_tb335fc_twrp) / [fox](https://github.com/tc1911/android_device_lenovo_tb335fc_fox)）
 
 ---
 
