@@ -1,0 +1,186 @@
+DBG-BOOT 补丁 v7（2026-09-27）—— N 秒后：复测 wlan 驱动 → 抄 属性/网卡/模块表/内核日志 → 写 BCB 重启进 fastboot
+
+位置（3 个文件，分属两个 git 项目）：
+  1. system/core/init/first_stage_init.cpp      —— DBG 主体（**init_boot 里的 init 就是这个模块编的**）
+  2. system/core/init/Android.bp                —— init_first_stage 增链 libbootloader_message
+  3. bootable/recovery/bootloader_message/Android.bp —— 该库加 ramdisk_available（否则 Soong 报
+     missing dependencies: libbootloader_message{...image:ramdisk...}）
+  应用方式：`git apply --include='init/*'`（在 ~/los20/system/core）+
+            `git apply --include='bootloader_message/*'`（在 ~/los20/bootable/recovery）
+  还原：system/core 下 `git checkout -- init/first_stage_init.cpp init/Android.bp`；
+        bootable/recovery 下 `git checkout -- bootloader_message/Android.bp`
+
+v6 比 v4 多做的事（全在那个 fork 出来的子进程里，T=N 秒时执行）：
+  a. finit_module("/metadata/kernelsu.ko") —— 试装 KernelSU LKM（KMI=android13-5.15）。
+     .ko 归档：archive/kernelsu-android13-5.15-v3.3.0.ko，md5 780ce905edb2f4b316a3c18615325e05
+     （来自 KernelSU v3.3.0 release 的 lkm-aarch64-android13-5.15_kernelsu.ko，vermagic
+     5.15.202-android13-5.15.202_r00 ... modversions aarch64 ✓）。rc/errno 直接写进 dump 文件。
+     v5 实测：kernelsu 不在 /proc/modules 里 → 装载被拒，但原因被 v5 的 kmsg bug 吞了。
+  b. finit_module("/vendor/lib/modules/wlan_drv_gen4m_6835.ko") —— 复测厂商 wlan 驱动。
+     v5 实测：/proc/modules 里有 wmt_chrdev_wifi/wmt_drv/bt_drv_connac1x/connfem/gps_pwr，
+     唯独 wlan_drv_gen4m_6835 没有 → init.wlan_drv.rc 第二个 insmod 失败 = WiFi 打不开的原因。
+  c. 内核 ring buffer 全量 + /proc/cmdline + /proc/modules → /metadata/dbg-kernel.log。
+  d. 老动作不变：sync() → write_reboot_bootloader() → syscall 重启进 fastboot。
+
+v5 的 bug（v6 修掉，重要教训）：
+  **读 /dev/kmsg 读不到历史消息** —— 它的读位置是「打开那一刻之后的新消息」，ring buffer
+  里已有的全读不到（v5 实测：那段整个空白）。dmesg 用的是 syslog(2) 系统调用，
+  必须 syscall(__NR_syslog, SYSLOG_ACTION_READ_ALL=3, buf, len) 才拿到全量（且不清 buffer）。
+  副产品教训：rc/errno 这种结论要直接写进 dump 文件，别只写日志——日志丢一次就白跑一轮。
+
+两个血泪要点（都踩过）：
+  * init_boot.img 的 ramdisk 只包含 init_first_stage 模块（first_stage_init.cpp）；
+    init.cpp 属于 init_second_stage（装到 system/bin/init，在 system 分区）。
+    把 DBG 打在 init.cpp 上会**静默无效**：mka initbootimage 9 秒“成功”，ninja 说 no work to
+    do，init_boot.img 一个字节没变（2026-09-24 实测）。
+  * 为什么必须写 BCB：AOSP 里只有第二阶段 init（reboot.cpp:1033）会 write_reboot_bootloader()
+    写 misc 的 bootonce-bootloader；MTK LK 只认它才进 fastboot。原来只有裸
+    syscall(RESTART2,"bootloader") → 窗口到点卡 logo（用户实测：600s 到点后 adb/fastboot 都看不到）。
+    write_reboot_bootloader 在 bootable/recovery/bootloader_message/bootloader_message.cpp:230，
+    内部用 ReadDefaultFstab 找 /misc；失败只 LOG(WARNING)（logkmsg 里能看到）。
+
+校验（scripts/build_initboot.sh 已内置，别绕过）：
+  · out/target/product/sycamore/ramdisk/init 里必须有 "DBG-BOOT" 串
+  · 干净版 ramdisk/init = 3144200 字节；带 DBG 的 = 3148576（v4）/ 更大（v5，多了 dump 代码）
+  · 常量校验（MOVZ w0,#N，0x52800000 + (N<<5)）v4 时在偏移 974912；v5 偏移可能变，看脚本打印
+
+diff --git a/init/Android.bp b/init/Android.bp
+index 3df0e91..f3238bd 100644
+--- a/init/Android.bp
++++ b/init/Android.bp
+@@ -354,6 +354,7 @@ cc_binary {
+         "liblp",
+         "libcutils",
+         "libbase",
++        "libbootloader_message",
+         "liblog",
+         "libcrypto_static",
+         "libselinux",
+diff --git a/init/first_stage_init.cpp b/init/first_stage_init.cpp
+index d050ed7..ba8339e 100644
+--- a/init/first_stage_init.cpp
++++ b/init/first_stage_init.cpp
+@@ -18,10 +18,13 @@
+ 
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <errno.h>
++#include <linux/reboot.h>
+ #include <paths.h>
+ #include <stdlib.h>
+ #include <sys/mount.h>
+ #include <sys/stat.h>
++#include <sys/syscall.h>
+ #include <sys/sysmacros.h>
+ #include <sys/types.h>
+ #include <sys/utsname.h>
+@@ -35,6 +38,8 @@
+ #include <android-base/chrono_utils.h>
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
++#include <android-base/properties.h>  // DBG-BOOT v7: 读 vendor.connsys.driver.ready 等属性
++#include <bootloader_message/bootloader_message.h>
+ #include <modprobe/modprobe.h>
+ #include <private/android_filesystem_config.h>
+ 
+@@ -416,6 +421,88 @@ int FirstStageMain(int argc, char** argv) {
+     setenv(kEnvFirstStageStartedAt, std::to_string(start_time.time_since_epoch().count()).c_str(),
+            1);
+ 
++    // ---- DBG-BOOT v7（测试用）: N 秒后 —— 抄 属性/网卡/模块表/内核日志 → 写 BCB 重启 ----
++    // v6 已验证：这一套（含写 BCB）能让设备到点自己回 fastboot，dump 落 /metadata/dbg-kernel.log。
++    // v6 两条教训：① /dev/kmsg 读不到历史消息，必须 syslog(2) READ_ALL；
++    //   ② KSU 那个 insmod 是纯噪声（GKI 不导出符号，纯 finit_module 装不上，需 ksud 做符号
++    //      重定位），已移除——免得上百行 Unknown symbol 把 ring buffer 冲掉、看不见厂商日志。
++    // v7 新增：属性快照（尤其 vendor.connsys.driver.ready —— 厂商 wlan rc 的触发条件）
++    //   和网络接口列表（判断驱动装上后 wlan0 到底出现没有）。
++    if (fork() == 0) {
++        sleep(120);
++
++        // (1) 复测厂商 wlan 驱动：v6 实测它没被装进内核（WiFi 打不开的直接原因）
++        int wlan_rc = -1, wlan_err = 0;
++        int wlan_fd = open("/vendor/lib/modules/wlan_drv_gen4m_6835.ko", O_RDONLY | O_CLOEXEC);
++        if (wlan_fd < 0) {
++            wlan_err = errno;
++        } else {
++            wlan_rc = syscall(__NR_finit_module, wlan_fd, "", 0);
++            wlan_err = errno;
++            close(wlan_fd);
++        }
++
++        // (2) 面包屑 + 等内核把详细理由打进 ring buffer（下一步要读它）
++        int kmsg_fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
++        if (kmsg_fd >= 0) {
++            std::string m = "DBG-BOOT v7: wlan rc=" + std::to_string(wlan_rc) +
++                            " errno=" + std::to_string(wlan_err) + "\n";
++            (void)write(kmsg_fd, m.c_str(), m.size());
++            close(kmsg_fd);
++        }
++        sleep(3);
++
++        // (3) 结论 + 属性 + 内核 ring buffer + cmdline + 模块表 + 网卡 → /metadata/dbg-kernel.log
++        //     结论放最前面：v5 就是日志读法错了白跑一轮，rc/errno 必须先落地。
++        std::string dump = "===== insmod results =====\n";
++        dump += "wlan_drv_gen4m_6835.ko rc=" + std::to_string(wlan_rc) +
++                " errno=" + std::to_string(wlan_err) + "\n";
++
++        dump += "\n===== properties =====\n";
++        for (const char* p : {"vendor.connsys.driver.ready", "ro.vendor.wlan.chrdev",
++                              "ro.vendor.wlan.gen", "sys.boot_completed",
++                              "init.svc.wlan_assistant", "init.svc.wmt_loader",
++                              "init.svc.wpa_supplicant", "vold.decrypt"}) {
++            dump += std::string(p) + " = [" + android::base::GetProperty(p, "<unset>") + "]\n";
++        }
++
++        {
++            static char kbuf[512 * 1024];  // 只在子进程里碰，不占第一阶段常驻内存
++            long n = syscall(__NR_syslog, 3 /* SYSLOG_ACTION_READ_ALL */, kbuf, sizeof(kbuf) - 1);
++            dump += "\n===== kernel ring buffer (syslog READ_ALL) =====\n";
++            if (n > 0) {
++                dump.append(kbuf, n);
++            } else {
++                dump += "syslog rc=" + std::to_string(n) + " errno=" + std::to_string(errno) + "\n";
++            }
++        }
++        for (const char* f : {"/proc/cmdline", "/proc/modules", "/proc/net/dev"}) {
++            dump += std::string("\n===== ") + f + " =====\n";
++            int fd = open(f, O_RDONLY | O_CLOEXEC);
++            if (fd < 0) {
++                dump += "open failed errno=" + std::to_string(errno) + "\n";
++                continue;
++            }
++            char buf[16384];
++            ssize_t n;
++            while ((n = read(fd, buf, sizeof(buf))) > 0) dump.append(buf, n);
++            close(fd);
++        }
++        if (!android::base::WriteStringToFile(dump, "/metadata/dbg-kernel.log")) {
++            LOG(WARNING) << "DBG-BOOT: 写 /metadata/dbg-kernel.log 失败";
++        }
++
++        sync();
++        std::string err;
++        if (!write_reboot_bootloader(&err)) {
++            LOG(WARNING) << "DBG-BOOT: write_reboot_bootloader failed: " << err;
++        }
++        syscall(__NR_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2,
++                "bootloader");
++        _exit(0);
++    }
++    // ---- /DBG-BOOT ----
++
+     const char* path = "/system/bin/init";
+     const char* args[] = {path, "selinux_setup", nullptr};
+     auto fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+diff --git a/bootloader_message/Android.bp b/bootloader_message/Android.bp
+index 23b8e70..4124516 100644
+--- a/bootloader_message/Android.bp
++++ b/bootloader_message/Android.bp
+@@ -46,6 +46,7 @@ cc_library {
+         "libbootloader_message_defaults",
+     ],
+     recovery_available: true,
++    ramdisk_available: true,  // DBG-BOOT 补丁：init_first_stage（ramdisk 变体）要用它写 BCB
+     host_supported: true,
+ 
+     target: {

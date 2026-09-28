@@ -1,0 +1,238 @@
+diff --git a/services/core/java/com/android/server/SystemServiceManager.java b/services/core/java/com/android/server/SystemServiceManager.java
+index 166806b3..279b860b 100644
+--- a/services/core/java/com/android/server/SystemServiceManager.java
++++ b/services/core/java/com/android/server/SystemServiceManager.java
+@@ -291,6 +291,7 @@ public final class SystemServiceManager implements Dumpable {
+                 long time = SystemClock.elapsedRealtime();
+                 t.traceBegin("OnBootPhase_" + phase + "_" + service.getClass().getName());
+                 try {
++                    Slog.i(TAG, "BOOTPHASE " + mCurrentPhase + ": " + service.getClass().getName());
+                     service.onBootPhase(mCurrentPhase);
+                 } catch (Exception ex) {
+                     throw new RuntimeException("Failed to boot service "
+diff --git a/services/core/java/com/android/server/am/ActivityManagerService.java b/services/core/java/com/android/server/am/ActivityManagerService.java
+index dbc7fc86..d68ea62d 100644
+--- a/services/core/java/com/android/server/am/ActivityManagerService.java
++++ b/services/core/java/com/android/server/am/ActivityManagerService.java
+@@ -5125,9 +5125,11 @@ public class ActivityManagerService extends IActivityManager.Stub
+         TimingsTraceAndSlog t = new TimingsTraceAndSlog(TAG + "Timing",
+                 Trace.TRACE_TAG_ACTIVITY_MANAGER);
+         t.traceBegin("FinishBooting");
++        Slog.i(TAG, "FB: finishBooting enter");
+ 
+         synchronized (this) {
+             if (!mBootAnimationComplete) {
++                Slog.i(TAG, "FB: waiting bootanim complete");
+                 mCallFinishBooting = true;
+                 return;
+             }
+@@ -5173,7 +5175,9 @@ public class ActivityManagerService extends IActivityManager.Stub
+         }
+ 
+         // Let system services know.
++        Slog.i(TAG, "FB: before PHASE_BOOT_COMPLETED");
+         mSystemServiceManager.startBootPhase(t, SystemService.PHASE_BOOT_COMPLETED);
++        Slog.i(TAG, "FB: after PHASE_BOOT_COMPLETED");
+ 
+         synchronized (this) {
+             // Ensure that any processes we had put on hold are now started
+@@ -5203,6 +5207,7 @@ public class ActivityManagerService extends IActivityManager.Stub
+                 UserspaceRebootLogger.noteUserspaceRebootSuccess();
+             }
+             // Tell anyone interested that we are done booting!
++            Slog.i(TAG, "FB: setting sys.boot_completed");
+             SystemProperties.set("sys.boot_completed", "1");
+ 
+             // And trigger dev.bootcomplete if we are not showing encryption progress
+diff --git a/services/core/java/com/android/server/soundtrigger_middleware/DefaultHalFactory.java b/services/core/java/com/android/server/soundtrigger_middleware/DefaultHalFactory.java
+index 2f2cb594..0ee596b2 100644
+--- a/services/core/java/com/android/server/soundtrigger_middleware/DefaultHalFactory.java
++++ b/services/core/java/com/android/server/soundtrigger_middleware/DefaultHalFactory.java
+@@ -73,7 +73,9 @@ class DefaultHalFactory implements HalFactory {
+ 
+                 // Fallback to soundtrigger-V2.x (HIDL).
+                 Log.i(TAG, "Connecting to default soundtrigger-V2.x.ISoundTriggerHw");
+-                ISoundTriggerHw driver = ISoundTriggerHw.getService(true);
++                // v74: 无 soundtrigger HAL 时 getService(true) 无限等待卡死 system_server。
++                // 改快速失败（retry=false），SoundTriggerMiddlewareImpl 会捕获异常优雅降级。
++                ISoundTriggerHw driver = ISoundTriggerHw.getService(false);
+                 return SoundTriggerHw2Compat.create(driver, () -> {
+                     // This property needs to be defined in an init.rc script and
+                     // trigger a HAL reboot.
+diff --git a/services/core/java/com/android/server/wm/DisplayPolicy.java b/services/core/java/com/android/server/wm/DisplayPolicy.java
+index 762669fa..eb15fcf6 100644
+--- a/services/core/java/com/android/server/wm/DisplayPolicy.java
++++ b/services/core/java/com/android/server/wm/DisplayPolicy.java
+@@ -757,9 +757,14 @@ public class DisplayPolicy {
+     public void updateSettings() {
+         ContentResolver resolver = mContext.getContentResolver();
+ 
+-        mForceNavbar = LineageSettings.System.getIntForUser(resolver,
+-                LineageSettings.System.FORCE_SHOW_NAVBAR, 0,
+-                UserHandle.USER_CURRENT);
++        // v65: 用户未解锁时读 LineageSettings 会 NPE（首启/慢解锁设备），加保护
++        try {
++            mForceNavbar = LineageSettings.System.getIntForUser(resolver,
++                    LineageSettings.System.FORCE_SHOW_NAVBAR, 0,
++                    UserHandle.USER_CURRENT);
++        } catch (Exception e) {
++            mForceNavbar = 0;
++        }
+     }
+ 
+     private int getDisplayId() {
+diff --git a/services/usb/java/com/android/server/usb/UsbDeviceManager.java b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+index fe7d87bc..b5fc74e0 100644
+--- a/services/usb/java/com/android/server/usb/UsbDeviceManager.java
++++ b/services/usb/java/com/android/server/usb/UsbDeviceManager.java
+@@ -306,7 +306,9 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+ 
+         boolean halNotPresent = false;
+         try {
+-            IUsbGadget.getService(true);
++            // v82: usb-gadget HAL 未提供时 getService(true) 无限等待卡死 boot（phase 1000）。
++            // 改快速失败（retry=false），走 halNotPresent 分支，USB 功能不可用但不阻塞 boot。
++            IUsbGadget.getService(false);
+         } catch (RemoteException e) {
+             Slog.e(TAG, "USB GADGET HAL present but exception thrown", e);
+         } catch (NoSuchElementException e) {
+@@ -2004,7 +2006,7 @@ public class UsbDeviceManager implements ActivityTaskManagerInternal.ScreenObser
+                 }
+ 
+                 synchronized (mGadgetProxyLock) {
+-                    mGadgetProxy = IUsbGadget.getService(true);
++                    mGadgetProxy = IUsbGadget.getService(false);  // v83: 快速失败避免卡 boot
+                     mGadgetProxy.linkToDeath(new UsbGadgetDeathRecipient(),
+                             USB_GADGET_HAL_DEATH_COOKIE);
+                     mCurrentFunctions = UsbManager.FUNCTION_NONE;
+diff --git a/services/usb/java/com/android/server/usb/UsbService.java b/services/usb/java/com/android/server/usb/UsbService.java
+index 86f877fc..6e50167c 100644
+--- a/services/usb/java/com/android/server/usb/UsbService.java
++++ b/services/usb/java/com/android/server/usb/UsbService.java
+@@ -94,9 +94,16 @@ public class UsbService extends IUsbManager.Stub {
+         @Override
+         public void onStart() {
+             SystemServerInitThreadPool.submit(() -> {
+-                mUsbService = new UsbService(getContext());
+-                publishBinderService(Context.USB_SERVICE, mUsbService);
+-                mOnStartFinished.complete(null);
++                // v87: 构造失败必须兜住，否则 mOnStartFinished 永不 complete、
++                // 550 阶段任务永久阻塞在 join()、mUsbService 永远是 null
++                try {
++                    mUsbService = new UsbService(getContext());
++                    publishBinderService(Context.USB_SERVICE, mUsbService);
++                } catch (Throwable t) {
++                    Slog.wtf(TAG, "v87: UsbService construction failed", t);
++                } finally {
++                    mOnStartFinished.complete(null);
++                }
+             }, "UsbService$Lifecycle#onStart");
+         }
+ 
+@@ -105,11 +112,30 @@ public class UsbService extends IUsbManager.Stub {
+             if (phase == SystemService.PHASE_ACTIVITY_MANAGER_READY) {
+                 SystemServerInitThreadPool.submit(() -> {
+                     mOnStartFinished.join();
++                    if (mUsbService == null) {
++                        Slog.w(TAG, "v87: USB550 skip, UsbService not created");
++                        return;
++                    }
++                    // v86: 诊断——确认是否卡在 systemReady()（usb HAL 缺失时可能永不返回）
++                    Slog.i(TAG, "v86: USB550 systemReady enter");
+                     mUsbService.systemReady();
++                    Slog.i(TAG, "v86: USB550 systemReady exit");
+                     mOnActivityManagerPhaseFinished.complete(null);
+                 }, "UsbService$Lifecycle#onBootPhase");
+             } else if (phase == SystemService.PHASE_BOOT_COMPLETED) {
+-                mOnActivityManagerPhaseFinished.join();
++                // v86: 10s 有限等待仍与 system_server watchdog 抢时间（v85 仍循环重启）。
++                // 改为 0 = 不等待、只探测；保留 Slog.w 作为"550 阶段任务是否完成"的信号。
++                try {
++                    mOnActivityManagerPhaseFinished.get(0, java.util.concurrent.TimeUnit.SECONDS);
++                } catch (Exception e) {
++                    Slog.w(TAG, "AM phase not finished, proceeding anyway", e);
++                }
++                // v87: onStart 的任务可能在建 UsbService 时就抛异常（A16 gadget 节点缺失 → ENOENT），
++                // 此时 mUsbService 仍为 null，硬调 bootCompleted() 会 NPE 打死 system_server（每 ~17s 重启循环）
++                if (mUsbService == null) {
++                    Slog.w(TAG, "v87: UsbService not created, skip bootCompleted");
++                    return;
++                }
+                 mUsbService.bootCompleted();
+             }
+         }
+diff --git a/services/usb/java/com/android/server/usb/hal/port/UsbPortAidl.java b/services/usb/java/com/android/server/usb/hal/port/UsbPortAidl.java
+index 94273a37..eda60523 100644
+--- a/services/usb/java/com/android/server/usb/hal/port/UsbPortAidl.java
++++ b/services/usb/java/com/android/server/usb/hal/port/UsbPortAidl.java
+@@ -155,7 +155,14 @@ public final class UsbPortAidl implements UsbPortHal {
+ 
+     static boolean isServicePresent(IndentingPrintWriter pw) {
+         try {
+-            return ServiceManager.isDeclared(USB_AIDL_SERVICE);
++            // v88: 原来只判 VINTF“声明”，不看实例在不在——A16 vendor 声明了
++            // android.hardware.usb.IUsb/default 但没起 AIDL HAL 实例，于是返回 true，
++            // 进 UsbPortAidl 构造后 ServiceManager.waitForService() 每秒重试、永不返回
++            // → UsbService$Lifecycle#onStart 永不结束（#onBootPhase 也卡在 join）
++            // → SystemServerInitThreadPool.shutdown() 抛 IllegalStateException
++            // → PHASE_BOOT_COMPLETED 前一刻 system_server FATAL 死循环（2026-09-24 实测）。
++            // 改成即时探测；没实例就当没有 port HAL（UsbPortManager 全程 null 检查）。
++            return ServiceManager.getService(USB_AIDL_SERVICE) != null;
+         } catch (NoSuchElementException e) {
+             logAndPrintException(pw, "connectToProxy: usb Aidl hal service not found.", e);
+         }
+diff --git a/libs/binder/ProcessState.cpp b/libs/binder/ProcessState.cpp
+index 4a01d81..bb4e375 100644
+--- a/libs/binder/ProcessState.cpp
++++ b/libs/binder/ProcessState.cpp
+@@ -390,8 +390,13 @@ void ProcessState::spawnPooledThread(bool isMain)
+ }
+ 
+ status_t ProcessState::setThreadPoolMaxThreadCount(size_t maxThreads) {
+-    LOG_ALWAYS_FATAL_IF(mThreadPoolStarted && maxThreads < mMaxThreads,
+-           "Binder threadpool cannot be shrunk after starting");
++    // v71: A16 MTK vendor HAL（android.hardware.audio.service.mediatek main 调
++    // ABinderProcess_setThreadPoolMaxThreadCount 缩小线程池）在 A13 libbinder 上 FATAL。
++    // 多余空闲 binder 线程无害，放宽为警告放行。
++    if (mThreadPoolStarted && maxThreads < mMaxThreads) {
++        ALOGW("Binder threadpool shrink requested after starting (%zu -> %zu); allowing",
++              mMaxThreads, maxThreads);
++    }
+     status_t result = NO_ERROR;
+     if (ioctl(mDriverFD, BINDER_SET_MAX_THREADS, &maxThreads) != -1) {
+         mMaxThreads = maxThreads;
+diff --git a/sdk/src/java/lineageos/providers/LineageSettings.java b/sdk/src/java/lineageos/providers/LineageSettings.java
+index af2f30f..fe862f2 100644
+--- a/sdk/src/java/lineageos/providers/LineageSettings.java
++++ b/sdk/src/java/lineageos/providers/LineageSettings.java
+@@ -280,6 +280,11 @@ public final class LineageSettings {
+             }
+ 
+             IContentProvider cp = mProviderHolder.getProvider(cr);
++            if (cp == null) {
++                // v67: user 未解锁时 provider 不可用，返回 null（getIntForUser 等会回退默认值）
++                Log.w(TAG, "Can't get provider " + mUri + " (user locked?), treat as unset");
++                return null;
++            }
+ 
+             // Try the fast path first, not using query().  If this
+             // fails (alternate Settings provider that doesn't support
+diff --git a/sdk/src/java/org/lineageos/internal/util/DeviceKeysConstants.java b/sdk/src/java/org/lineageos/internal/util/DeviceKeysConstants.java
+index 8fd7723..ffbb3ec 100644
+--- a/sdk/src/java/org/lineageos/internal/util/DeviceKeysConstants.java
++++ b/sdk/src/java/org/lineageos/internal/util/DeviceKeysConstants.java
+@@ -46,8 +46,12 @@ public class DeviceKeysConstants {
+         }
+ 
+         public static Action fromSettings(ContentResolver cr, String setting, Action def) {
+-            return fromIntSafe(LineageSettings.System.getIntForUser(cr,
+-                    setting, def.ordinal(), UserHandle.USER_CURRENT));
++            try {
++                return fromIntSafe(LineageSettings.System.getIntForUser(cr,
++                        setting, def.ordinal(), UserHandle.USER_CURRENT));
++            } catch (Exception e) {
++                return def;
++            }
+         }
+     }
+ 

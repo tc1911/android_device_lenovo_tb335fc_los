@@ -1,0 +1,30 @@
+# v91: TB335FC 显示/背光守护 + 内核日志常驻
+#
+# 现场问题：A13 SurfaceFlinger × A16 HWC 在挂起 2 分钟后开屏序列卡死（屏黑/黑屏常亮背光、
+# framework 假醒、电源键无效）。详见 BOOT_HACKS.md §6 附 2 与 AGENTS.md 坑 19。
+#
+# 本 build 的 SELinux = Permissive（ro.build.type=userdebug），所以不需要任何 sepolicy 规则；
+# 显式指定 su 域（adb root 用的就是它，权限够宽），避免依赖「服务名 → 域」的默认推导。
+service tb335_display /system/bin/led_daemon.sh
+    class main
+    user root
+    group root system
+    seclabel u:r:su:s0
+    disabled
+
+# 等 /data 挂好（内核日志要写 /data/local/tmp）再起
+on property:sys.boot_completed=1
+    start tb335_display
+
+# ===== 2026-09-28: 厂商 blob 硬编码旧布局路径 /system/vendor/... =====
+# 音频 HAL 读 /system/vendor/etc/aurisys_config.xml（ENOENT → 空配置 → 空指针 → 3min 崩 30 次）。
+# ⚠️ / 和 /system 是同一张 erofs ro（system-as-root），root 也写不了（adb root 后 ln 一样 EROFS），
+# 所以 post-fs-data 里的 symlink 必然失败（实测 "symlink() failed: Read-only file system"）。
+# 正解 = 先给 /system 套一层 rw overlay 再建 → 命令见下面（init 命令是双保险，主路径在 led_daemon.sh 里）。
+# 根因/证据见 BOOT_HACKS.md §6 第 1 条 + AGENTS.md 坑 20。
+on property:sys.boot_completed=1
+    start tb335_display
+    mkdir /data/local/tmp/ovl/upper 0777 root root
+    mkdir /data/local/tmp/ovl/work 0777 root root
+    mount overlay ovl /system rw lowerdir=/system,upperdir=/data/local/tmp/ovl/upper,workdir=/data/local/tmp/ovl/work
+    symlink /vendor /system/vendor

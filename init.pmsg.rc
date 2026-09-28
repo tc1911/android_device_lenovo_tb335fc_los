@@ -1,0 +1,17 @@
+on early-init
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG1: early-init\n"
+
+on init
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG2: on-init\n"
+
+on fs
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG3: on-fs\n"
+
+on boot
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG4: on-boot\n"
+
+on post-fs-data
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG5: post-fs-data\n"
+
+on property:sys.boot_completed=1
+    write /sys/fs/pstore/pmsg-ramoops-0 "PMSG6: boot_completed\n"

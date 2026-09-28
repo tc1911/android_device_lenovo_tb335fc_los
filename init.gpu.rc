@@ -1,0 +1,4 @@
+# GPU (Mali) 内核模块：从 vendor_dlkm 分区加载（stock 顺序，dep 自动解析）
+# modprobe 依赖 /vendor_dlkm/lib/modules/modules.dep（first_stage 已挂载 vendor_dlkm）
+on init
+    exec u:r:init:s0 -- /system/bin/modprobe -d /vendor_dlkm/lib/modules mali_kbase_mt6835

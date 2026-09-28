@@ -1,0 +1,11 @@
+// v91: 预装 Xime 输入法（中文，Rime 引擎，GPL-3.0）
+// AOSP 禁止用 PRODUCT_COPY_FILES 拷 APK（Makefile:72 直接报错），必须走模块导入。
+// presigned：APK 用作者自己的签名，不重签；dex_preopt 关掉（预编译包没有源码，没法预优化）。
+android_app_import {
+    name: "Xime",
+    apk: "Xime.apk",
+    presigned: true,
+    dex_preopt: {
+        enabled: false,
+    },
+}

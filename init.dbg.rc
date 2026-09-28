@@ -1,0 +1,20 @@
+on early-init
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG1-early-init" > /dev/kmsg
+
+on init
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG2-on-init" > /dev/kmsg
+
+on fs
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG3-on-fs" > /dev/kmsg
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG3b-on-fs-rebooting" > /dev/kmsg
+    exec u:r:init:s0 -- /system/bin/toybox reboot
+
+on post-fs
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG4-post-fs" > /dev/kmsg
+
+on boot
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG5-on-boot" > /dev/kmsg
+
+on late-init && property:sys.boot_completed=0
+    exec u:r:init:s0 -- /system/bin/toybox echo "DBG6-late-init" > /dev/kmsg
+    exec u:r:init:s0 -- /system/bin/toybox reboot

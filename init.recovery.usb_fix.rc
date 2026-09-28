@@ -1,0 +1,12 @@
+on early-init
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller 11201000.usb0
+
+on init
+    mkdir /config 0000
+    mount configfs none /config
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller 11201000.usb0
+    setprop sys.usb.config adb
+    setprop sys.usb.state adb
+    setprop persist.sys.usb.config adb

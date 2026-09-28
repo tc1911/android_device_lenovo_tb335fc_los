@@ -1,0 +1,82 @@
+# TWRP recovery.fstab for Lenovo TB335FC (sycamore / MT6835)
+# A/B - 动态分区 - GKI
+# from stock /system/etc/recovery.fstab + /first_stage_ramdisk/fstab.mt6835
+
+# 动态分区 (super) - logical
+system       /system         erofs ro slotselect,logical     wait,first_stage_mount
+system       /system         ext4  ro slotselect,logical     wait,first_stage_mount
+system_ext   /system_ext     erofs ro slotselect,logical     wait,first_stage_mount
+system_ext   /system_ext     ext4  ro slotselect,logical     wait,first_stage_mount
+vendor       /vendor         erofs ro slotselect,logical     wait,first_stage_mount
+vendor       /vendor         ext4  ro slotselect,logical     wait,first_stage_mount
+product      /product        erofs ro slotselect,logical     wait,first_stage_mount
+product      /product        ext4  ro slotselect,logical     wait,first_stage_mount
+vendor_dlkm  /vendor_dlkm    erofs ro slotselect,logical     wait,first_stage_mount
+vendor_dlkm  /vendor_dlkm    ext4  ro slotselect,logical     wait,first_stage_mount
+odm_dlkm     /odm_dlkm       erofs ro slotselect,logical     wait,first_stage_mount
+odm_dlkm     /odm_dlkm       ext4  ro slotselect,logical     wait,first_stage_mount
+system_dlkm  /system_dlkm   erofs ro slotselect,logical     wait,first_stage_mount
+system_dlkm  /system_dlkm   ext4  ro slotselect,logical     wait,first_stage_mount
+
+# 用户数据（F2FS + metadata 加密）
+/dev/block/by-name/userdata  /data     f2fs   noatime,nosuid,nodev,discard,inlinecrypt,formattable,resize,fsync_mode=nobarrier,checkpoint=fs  wait,check,formattable,resize,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized,keydirectory=/metadata/vold/metadata_encryption
+/dev/block/by-name/metadata  /metadata f2fs   noatime,nosuid,nodev,discard    wait,check,formattable,first_stage_mount
+
+# 联想/MTK 专有分区
+/dev/block/by-name/protect1   /mnt/vendor/protect_f  ext4  noatime,nosuid,nodev  wait,check,formattable
+/dev/block/by-name/protect2   /mnt/vendor/protect_s  ext4  noatime,nosuid,nodev  wait,check,formattable
+/dev/block/by-name/nvdata     /mnt/vendor/nvdata     ext4  noatime,nosuid,nodev  wait,check,formattable
+/dev/block/by-name/nvcfg      /mnt/vendor/nvcfg      ext4  noatime,nosuid,nodev  wait,check,formattable
+/dev/block/by-name/persist    /mnt/vendor/persist    ext4  noatime,nosuid,nodev  wait,check,formattable
+/dev/block/by-name/lenovocust /lenovocust            ext4  noatime,nosuid,nodev  wait,check,formattable
+
+# 引导相关（可备份/刷写）
+/dev/block/by-name/boot          /boot          emmc  defaults  slotselect
+/dev/block/by-name/init_boot     /init_boot     emmc  defaults  slotselect
+/dev/block/by-name/vendor_boot   /vendor_boot   emmc  defaults  slotselect
+/dev/block/by-name/dtbo          /dtbo          emmc  defaults  slotselect
+/dev/block/by-name/vbmeta        /vbmeta        emmc  defaults  slotselect
+/dev/block/by-name/vbmeta_system /vbmeta_system emmc  defaults  slotselect
+/dev/block/by-name/vbmeta_vendor /vbmeta_vendor emmc  defaults  slotselect
+/dev/block/by-name/lk            /lk            emmc  defaults  slotselect
+/dev/block/by-name/lk2           /lk2           emmc  defaults  slotselect
+/dev/block/by-name/logo          /logo          emmc  defaults  slotselect
+/dev/block/by-name/preloader     /preloader     emmc  defaults
+/dev/block/by-name/preloader_a   /preloader_a   emmc  defaults  slotselect
+/dev/block/by-name/preloader_b   /preloader_b   emmc  defaults  slotselect
+
+# MTK 固件分区（备份用）
+/dev/block/by-name/nvram        /nvram        emmc  defaults
+/dev/block/by-name/proinfo      /proinfo      emmc  defaults
+/dev/block/by-name/lenovoraw    /lenovoraw    emmc  defaults
+/dev/block/by-name/lenovolock   /lenovolock   emmc  defaults
+/dev/block/by-name/seccfg       /seccfg       emmc  defaults  slotselect
+/dev/block/by-name/frp          /frp          emmc  defaults
+/dev/block/by-name/misc         /misc         emmc  defaults
+/dev/block/by-name/expdb        /expdb        emmc  defaults
+/dev/block/by-name/efuse        /efuse        emmc  defaults
+/dev/block/by-name/tee1         /tee1         emmc  defaults
+/dev/block/by-name/tee2         /tee2         emmc  defaults
+/dev/block/by-name/sspm1        /sspm1        emmc  defaults  slotselect
+/dev/block/by-name/sspm2        /sspm2        emmc  defaults  slotselect
+/dev/block/by-name/scp1         /scp1         emmc  defaults  slotselect
+/dev/block/by-name/scp2         /scp2         emmc  defaults  slotselect
+/dev/block/by-name/mcupm1       /mcupm1       emmc  defaults  slotselect
+/dev/block/by-name/mcupm2       /mcupm2       emmc  defaults  slotselect
+/dev/block/by-name/dpm1         /dpm1         emmc  defaults  slotselect
+/dev/block/by-name/dpm2         /dpm2         emmc  defaults  slotselect
+/dev/block/by-name/gz1          /gz1          emmc  defaults  slotselect
+/dev/block/by-name/gz2          /gz2          emmc  defaults  slotselect
+/dev/block/by-name/vcp          /vcp          emmc  defaults
+/dev/block/by-name/spmfw        /spmfw        emmc  defaults
+/dev/block/by-name/connsys_wifi  /connsys_wifi  emmc  defaults  slotselect
+/dev/block/by-name/connsys_bt   /connsys_bt   emmc  defaults  slotselect
+/dev/block/by-name/dtbo          /dtbo         emmc  defaults  slotselect
+/dev/block/by-name/pi_img       /pi_img       emmc  defaults
+/dev/block/by-name/boot_para    /boot_para    emmc  defaults
+/dev/block/by-name/odmdtbo      /odmdtbo      emmc  defaults
+
+# 外部存储
+/devices/platform/soc/11240000.mmc*            auto auto   defaults  voldmanaged=sdcard1:auto,encryptable=userdata
+/devices/platform/usb_xhci*                    auto vfat   defaults  voldmanaged=usbotg:auto
+/devices/platform/soc/11201000.usb0/11200000.xhci* auto vfat defaults voldmanaged=usbotg:auto

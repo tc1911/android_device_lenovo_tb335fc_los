@@ -1,0 +1,6 @@
+# AIDL HAL 服务注册到 vndservicemanager 时按此映射查找 context
+# 缺失会导致 selabel_lookup 失败 → addService 返回 -3 (EX_SECURITY)
+android.hardware.security.keymint.IKeyMintDevice/default               u:object_r:hal_keymint_service:s0
+android.hardware.security.keymint.IRemotelyProvisionedComponent/default u:object_r:hal_remotelyprovisionedcomponent_service:s0
+android.hardware.security.secureclock.ISecureClock/default             u:object_r:hal_secureclock_service:s0
+android.hardware.security.sharedsecret.ISharedSecret/default           u:object_r:hal_sharedsecret_service:s0
